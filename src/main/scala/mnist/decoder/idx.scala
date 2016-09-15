@@ -17,22 +17,22 @@ object idx {
       Task.delay(is.read(buf)).map(bytes => Chunk.bytes(buf, 0, bytes))
 
     for {
-      is <- fis
-      arr <- segment(is, makeBuffer(4))
-      magic = MagicNumber(arr.toArray)
-      dims <- segment(is, makeBuffer(magic.dims * 4))
-      dimsizes = dims.toArray.grouped(4).map(ba => ByteBuffer.wrap(ba).getInt).toVector
-      head = Header(magic.content, magic.dataType, magic.dims, dimsizes)
-      samples = dimsizes.head
-      datalen = dimsizes.tail.product * magic.dataType.byteLength
-      ds = readInputStream(Task.now(is), datalen * 10).sliding(datalen).zipWithIndex.map { vecidx =>
+      is         <- fis // Inputstream
+      arr        <- segment(is, makeBuffer(4)) // Segment the 4-byte magic number
+      magic      = MagicNumber(arr.toArray) // Parse it
+      dims       <- segment(is, makeBuffer(magic.dims * 4)) // Grab the rest of the header w/dimensions 0 ... n
+      dimsizes   = dims.toArray.grouped(4).map(ba => ByteBuffer.wrap(ba).getInt).toVector // Convert 4-byte chunks to #'s
+      head       = Header(magic.content, magic.dataType, magic.dims, dimsizes) // Idx metadata
+      samples    = dimsizes.head // Dimension 0, number of samples, rows, images, labels, what-have-you.
+      datalen    = dimsizes.tail.product * magic.dataType.byteLength // (dimensions 1 to n) * byte-length of the data
+      datastream = readInputStream(Task.now(is), datalen * 10).sliding(datalen).zipWithIndex.map { vecidx =>
         val (bvec, idx) = vecidx
         magic.content match {
           case IdxType.Images => IdxData.Image(idx, head.dimSizes(1), head.dimSizes(2), bvec.toArray)
           case IdxType.Labels => IdxData.Label(idx, bvec.toArray)
         }
       }
-    } yield IdxFile(head, ds)
+    } yield IdxFile(head, datastream)
   }
 
   case class MagicNumber(bytes: Array[Byte]) {
